@@ -178,15 +178,31 @@
 </head>
 <body>
 
+<!-- ══ PANTALLA LOGIN ══ -->
+<div id="loginScreen" style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;padding:24px;text-align:center">
+  <div style="font-size:3.5rem;margin-bottom:12px">🍞</div>
+  <h1 style="font-family:'Playfair Display',serif;font-size:1.8rem;color:var(--brown-dark);margin-bottom:6px">Mis Budines</h1>
+  <p style="color:var(--text-muted);font-size:0.85rem;margin-bottom:32px">Registro de ventas</p>
+  <button id="btnLogin" onclick="loginConGoogle()" style="display:flex;align-items:center;gap:10px;padding:14px 24px;background:#fff;border:1.5px solid rgba(196,133,74,0.3);border-radius:14px;font-family:'DM Sans',sans-serif;font-size:0.95rem;font-weight:500;color:var(--text);cursor:pointer;box-shadow:var(--shadow);transition:all 0.2s">
+    <svg width="18" height="18" viewBox="0 0 48 48"><path fill="#FFC107" d="M43.6 20H24v8h11.3C33.6 32.6 29.3 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3 0 5.8 1.1 7.9 3l5.7-5.7C34.1 6.5 29.3 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20c11 0 20-9 20-20 0-1.3-.1-2.7-.4-4z"/><path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.5 16 19 13 24 13c3 0 5.8 1.1 7.9 3l5.7-5.7C34.1 6.5 29.3 4 24 4c-7.7 0-14.3 4.4-17.7 10.7z"/><path fill="#4CAF50" d="M24 44c5.2 0 9.9-1.9 13.5-5l-6.2-5.2C29.4 35.5 26.8 36 24 36c-5.2 0-9.6-3.3-11.3-8H6.3C9.7 36.5 16.3 44 24 44z" /><path fill="#1976D2" d="M43.6 20H24v8h11.3c-.9 2.4-2.5 4.4-4.6 5.8l6.2 5.2C40.5 35.5 44 30.2 44 24c0-1.3-.1-2.7-.4-4z"/></svg>
+    Entrar con Google
+  </button>
+  <p id="loginError" style="display:none;margin-top:16px;color:var(--accent);font-size:0.82rem;max-width:280px"></p>
+</div>
+
+<!-- ══ APP ══ -->
+<div id="appContainer" style="display:none">
+
 <header>
   <h1>🍞 Mis Budines</h1>
-  <p>Registro de ventas</p>
+  <p id="userEmail" style="font-size:0.7rem;opacity:0.5;margin-top:1px"></p>
   <nav class="tabs">
     <button class="tab active"  onclick="showTab('venta',this)">    <span class="tab-icon">➕</span>Venta</button>
     <button class="tab"         onclick="showTab('productos',this)"> <span class="tab-icon">🏷</span>Productos</button>
     <button class="tab"         onclick="showTab('resumen',this)">   <span class="tab-icon">📊</span>Resumen</button>
     <button class="tab"         onclick="showTab('historial',this)"> <span class="tab-icon">📋</span>Historial</button>
     <button class="tab"         onclick="showTab('graficos',this)">  <span class="tab-icon">📈</span>Gráficos</button>
+    <button class="tab"         onclick="cerrarSesion()">            <span class="tab-icon">🚪</span>Salir</button>
   </nav>
 </header>
 
@@ -307,6 +323,8 @@
   <div class="chart-card"><h3>Métodos de pago</h3><div class="chart-wrap" style="height:175px"><canvas id="chartMetodos"></canvas></div></div>
 </div>
 
+</div><!-- /appContainer -->
+
 <div class="toast" id="toast"></div>
 <div id="loadingBar" style="position:fixed;top:0;left:0;right:0;height:3px;background:linear-gradient(90deg,var(--brown-light),var(--accent));z-index:999;display:none;animation:loadingAnim 1.2s ease-in-out infinite">
 </div>
@@ -320,6 +338,8 @@ import { initializeApp }                                    from 'https://www.gs
 import { getFirestore, doc, getDoc, setDoc, collection,
          addDoc, deleteDoc, onSnapshot, query,
          orderBy }                                          from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
+import { getAuth, GoogleAuthProvider, signInWithPopup,
+         signOut, onAuthStateChanged }                      from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js';
 
 // ════════════════════════════════
 //  FIREBASE
@@ -332,8 +352,16 @@ const firebaseConfig = {
   messagingSenderId: "679855877268",
   appId: "1:679855877268:web:d74f221eac84bfaa7e5881"
 };
-const app = initializeApp(firebaseConfig);
-const db  = getFirestore(app);
+const app      = initializeApp(firebaseConfig);
+const db       = getFirestore(app);
+const auth     = getAuth(app);
+const provider = new GoogleAuthProvider();
+
+// ══ Emails autorizados — agregá el de tu socia acá ══
+const EMAILS_AUTORIZADOS = [
+  // 'tumail@gmail.com',
+  // 'maildetusocia@gmail.com',
+];
 
 // ════════════════════════════════
 //  ESTADO
@@ -349,11 +377,68 @@ let metodoSel = null;
 let filtroActual = 'todo';
 let precioAutoActivo = false;
 let charts = {};
+let unsubVentas = null;
 
 // ════════════════════════════════
-//  INIT
+//  AUTH
 // ════════════════════════════════
-document.addEventListener('DOMContentLoaded', async () => {
+onAuthStateChanged(auth, async user => {
+  if (!user) {
+    mostrarPantallaLogin();
+    return;
+  }
+
+  // Verificar email autorizado (si la lista no está vacía)
+  if (EMAILS_AUTORIZADOS.length > 0 && !EMAILS_AUTORIZADOS.includes(user.email)) {
+    await signOut(auth);
+    mostrarPantallaLogin('Tu cuenta no está autorizada para acceder.');
+    return;
+  }
+
+  // Usuario válido → mostrar app
+  ocultarPantallaLogin(user);
+  iniciarApp();
+});
+
+async function loginConGoogle() {
+  try {
+    document.getElementById('btnLogin').textContent = 'Iniciando...';
+    document.getElementById('btnLogin').disabled = true;
+    await signInWithPopup(auth, provider);
+  } catch(e) {
+    document.getElementById('btnLogin').textContent = 'Entrar con Google';
+    document.getElementById('btnLogin').disabled = false;
+    if (e.code !== 'auth/popup-closed-by-user')
+      showToast('Error al iniciar sesión', false);
+  }
+}
+
+async function cerrarSesion() {
+  if (unsubVentas) unsubVentas();
+  await signOut(auth);
+}
+
+function mostrarPantallaLogin(error) {
+  document.getElementById('loginScreen').style.display = 'flex';
+  document.getElementById('appContainer').style.display = 'none';
+  if (error) {
+    document.getElementById('loginError').textContent = error;
+    document.getElementById('loginError').style.display = 'block';
+  }
+  document.getElementById('btnLogin').textContent = 'Entrar con Google';
+  document.getElementById('btnLogin').disabled = false;
+}
+
+function ocultarPantallaLogin(user) {
+  document.getElementById('loginScreen').style.display = 'none';
+  document.getElementById('appContainer').style.display = 'block';
+  document.getElementById('userEmail').textContent = user.email;
+}
+
+// ════════════════════════════════
+//  INIT APP (solo si está logueado)
+// ════════════════════════════════
+async function iniciarApp() {
   document.getElementById('resumenFecha').value = hoy();
   resetFechaHoy();
   mostrarCargando(true);
@@ -369,16 +454,15 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Escuchar ventas en tiempo real
   const q = query(collection(db, 'ventas'), orderBy('fecha', 'desc'));
-  onSnapshot(q, snap => {
+  unsubVentas = onSnapshot(q, snap => {
     ventas = snap.docs.map(d => ({ firestoreId: d.id, ...d.data() }));
     mostrarCargando(false);
-    // refrescar vista activa
     const tab = document.querySelector('.screen.active')?.id?.replace('screen-','');
     if (tab === 'resumen')   actualizarResumen();
     if (tab === 'historial') renderHistorial();
     if (tab === 'graficos')  renderGraficos();
   });
-});
+}
 
 function mostrarCargando(on) {
   document.getElementById('loadingBar').style.display = on ? 'block' : 'none';
@@ -917,6 +1001,8 @@ function showToast(msg, ok=true) {
 }
 
 // Exponer funciones al HTML (necesario con type="module")
+window.loginConGoogle    = loginConGoogle;
+window.cerrarSesion      = cerrarSesion;
 window.showTab           = showTab;
 window.agregarProducto   = agregarProducto;
 window.quitarProducto    = quitarProducto;
