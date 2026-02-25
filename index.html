@@ -326,6 +326,9 @@
 </div><!-- /appContainer -->
 
 <div class="toast" id="toast"></div>
+<div id="offlineBanner" style="display:none;position:fixed;bottom:0;left:0;right:0;background:var(--brown-dark);color:var(--cream);text-align:center;padding:8px;font-size:0.78rem;font-family:'DM Sans',sans-serif;z-index:998">
+  📵 Sin conexión — las ventas se guardarán cuando vuelva internet
+</div>
 <div id="loadingBar" style="position:fixed;top:0;left:0;right:0;height:3px;background:linear-gradient(90deg,var(--brown-light),var(--accent));z-index:999;display:none;animation:loadingAnim 1.2s ease-in-out infinite">
 </div>
 <style>
@@ -337,7 +340,7 @@
 import { initializeApp }                                    from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js';
 import { getFirestore, doc, getDoc, setDoc, collection,
          addDoc, deleteDoc, onSnapshot, query,
-         orderBy, enableIndexedDbPersistence }              from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
+         orderBy, enableIndexedDbPersistence }               from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
 import { getAuth, GoogleAuthProvider, signInWithPopup,
          signOut, onAuthStateChanged }                      from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js';
 
@@ -356,6 +359,21 @@ const app      = initializeApp(firebaseConfig);
 const db       = getFirestore(app);
 const auth     = getAuth(app);
 const provider = new GoogleAuthProvider();
+
+// Persistencia offline — guarda localmente y sincroniza cuando vuelve internet
+enableIndexedDbPersistence(db).catch(err => {
+  if (err.code === 'failed-precondition') console.warn('Persistencia no disponible: múltiples tabs abiertas');
+  if (err.code === 'unimplemented')       console.warn('El navegador no soporta persistencia offline');
+});
+
+// Banner de estado de conexión
+window.addEventListener('online',  () => {
+  document.getElementById('offlineBanner').style.display = 'none';
+  showToast('Conexión restaurada — sincronizando... ✓');
+});
+window.addEventListener('offline', () => {
+  document.getElementById('offlineBanner').style.display = 'block';
+});
 
 // ══ Emails autorizados — agregá el de tu socia acá ══
 const EMAILS_AUTORIZADOS = [
