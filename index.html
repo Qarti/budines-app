@@ -922,14 +922,14 @@ function renderHistorial() {
           </div>`).join('')}
       </div>
       ${v.observaciones ? `<div class="venta-obs">${v.observaciones}</div>` : ''}
-      <button class="btn-del" onclick="eliminarVenta('${v.localId}')">🗑 Eliminar</button>
+      <button class="btn-del" onclick="eliminarVenta('${v.localId || v.firestoreId}')">🗑 Eliminar</button>
     </div>
   `).join('');
 }
 
 async function eliminarVenta(localId) {
   if (!confirm('¿Eliminar esta venta?')) return;
-  const venta = ventas.find(v => v.localId === localId);
+  const venta = ventas.find(v => v.localId === localId || v.firestoreId === localId);
   if (!venta) return;
   await borrarVenta(venta);
   showToast('Venta eliminada');
