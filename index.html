@@ -181,7 +181,7 @@
 <!-- ══ PANTALLA LOGIN ══ -->
 <div id="loginScreen" style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;padding:24px;text-align:center">
   <div style="font-size:3.5rem;margin-bottom:12px">🍞</div>
-  <h1 style="font-family:'Playfair Display',serif;font-size:1.8rem;color:var(--brown-dark);margin-bottom:6px">Mis Budines</h1>
+  <h1 style="font-family:'Playfair Display',serif;font-size:1.8rem;color:var(--brown-dark);margin-bottom:6px">Miel y Melena</h1>
   <p style="color:var(--text-muted);font-size:0.85rem;margin-bottom:32px">Registro de ventas</p>
   <button id="btnLogin" onclick="loginConGoogle()" style="display:flex;align-items:center;gap:10px;padding:14px 24px;background:#fff;border:1.5px solid rgba(196,133,74,0.3);border-radius:14px;font-family:'DM Sans',sans-serif;font-size:0.95rem;font-weight:500;color:var(--text);cursor:pointer;box-shadow:var(--shadow);transition:all 0.2s">
     <svg width="18" height="18" viewBox="0 0 48 48"><path fill="#FFC107" d="M43.6 20H24v8h11.3C33.6 32.6 29.3 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3 0 5.8 1.1 7.9 3l5.7-5.7C34.1 6.5 29.3 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20c11 0 20-9 20-20 0-1.3-.1-2.7-.4-4z"/><path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.5 16 19 13 24 13c3 0 5.8 1.1 7.9 3l5.7-5.7C34.1 6.5 29.3 4 24 4c-7.7 0-14.3 4.4-17.7 10.7z"/><path fill="#4CAF50" d="M24 44c5.2 0 9.9-1.9 13.5-5l-6.2-5.2C29.4 35.5 26.8 36 24 36c-5.2 0-9.6-3.3-11.3-8H6.3C9.7 36.5 16.3 44 24 44z" /><path fill="#1976D2" d="M43.6 20H24v8h11.3c-.9 2.4-2.5 4.4-4.6 5.8l6.2 5.2C40.5 35.5 44 30.2 44 24c0-1.3-.1-2.7-.4-4z"/></svg>
@@ -194,7 +194,7 @@
 <div id="appContainer" style="display:none">
 
 <header>
-  <h1>🍞 Mis Budines</h1>
+  <h1>🍞 Miel y Melena</h1>
   <p id="userEmail" style="font-size:0.7rem;opacity:0.5;margin-top:1px"></p>
   <nav class="tabs">
     <button class="tab active"  onclick="showTab('venta',this)">    <span class="tab-icon">➕</span>Venta</button>
@@ -291,7 +291,7 @@
   <div class="stats-grid">
     <div class="stat-card accent"><div class="stat-label">Total del día</div><div class="stat-value" id="totalDia">$0</div></div>
     <div class="stat-card"><div class="stat-label">Transacciones</div><div class="stat-value" id="cantVentas">0</div></div>
-    <div class="stat-card"><div class="stat-label">Budines vendidos</div><div class="stat-value" id="cantBudines">0</div></div>
+    <div class="stat-card"><div class="stat-label">Productos vendidos</div><div class="stat-value" id="cantBudines">0</div></div>
     <div class="stat-card"><div class="stat-label">Ticket promedio</div><div class="stat-value" id="ticketPromedio">$0</div></div>
   </div>
   <div class="form-card"><p class="section-title">Ventas por sabor</p><div id="saborBars"></div></div>
@@ -339,8 +339,8 @@
 <script type="module">
 import { initializeApp }                                    from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js';
 import { getFirestore, doc, getDoc, setDoc, collection,
-         addDoc, deleteDoc, onSnapshot, query,
-         orderBy, enableIndexedDbPersistence }               from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
+         addDoc, deleteDoc, getDocs, query,
+         orderBy }                                          from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
 import { getAuth, GoogleAuthProvider, signInWithPopup,
          signOut, onAuthStateChanged }                      from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js';
 
@@ -361,15 +361,11 @@ const auth     = getAuth(app);
 const provider = new GoogleAuthProvider();
 
 // Persistencia offline — guarda localmente y sincroniza cuando vuelve internet
-enableIndexedDbPersistence(db).catch(err => {
-  if (err.code === 'failed-precondition') console.warn('Persistencia no disponible: múltiples tabs abiertas');
-  if (err.code === 'unimplemented')       console.warn('El navegador no soporta persistencia offline');
-});
 
 // Banner de estado de conexión
-window.addEventListener('online',  () => {
+window.addEventListener('online', async () => {
   document.getElementById('offlineBanner').style.display = 'none';
-  showToast('Conexión restaurada — sincronizando... ✓');
+  await sincronizarPendientes();
 });
 window.addEventListener('offline', () => {
   document.getElementById('offlineBanner').style.display = 'block';
@@ -395,25 +391,31 @@ let metodoSel = null;
 let filtroActual = 'todo';
 let precioAutoActivo = false;
 let charts = {};
-let unsubVentas = null;
 
 // ════════════════════════════════
-//  AUTH
+//  AUTH — sesión persistida en localStorage
 // ════════════════════════════════
 onAuthStateChanged(auth, async user => {
   if (!user) {
+    // Revisar si hay sesión guardada localmente para no pedir login offline
+    const sesionGuardada = lsGetSession();
+    if (sesionGuardada && !navigator.onLine) {
+      // Continuar offline con la sesión guardada
+      ocultarPantallaLogin({ email: sesionGuardada.email });
+      iniciarAppOffline();
+      return;
+    }
     mostrarPantallaLogin();
     return;
   }
 
-  // Verificar email autorizado (si la lista no está vacía)
   if (EMAILS_AUTORIZADOS.length > 0 && !EMAILS_AUTORIZADOS.includes(user.email)) {
     await signOut(auth);
     mostrarPantallaLogin('Tu cuenta no está autorizada para acceder.');
     return;
   }
 
-  // Usuario válido → mostrar app
+  lsSetSession({ email: user.email, uid: user.uid });
   ocultarPantallaLogin(user);
   iniciarApp();
 });
@@ -432,7 +434,7 @@ async function loginConGoogle() {
 }
 
 async function cerrarSesion() {
-  if (unsubVentas) unsubVentas();
+  localStorage.removeItem('budines_session');
   await signOut(auth);
 }
 
@@ -454,32 +456,39 @@ function ocultarPantallaLogin(user) {
 }
 
 // ════════════════════════════════
-//  INIT APP (solo si está logueado)
+//  INIT APP
 // ════════════════════════════════
-async function iniciarApp() {
+
+// Inicio offline: solo usa localStorage
+function iniciarAppOffline() {
+  catalogo = lsGetCatalogo() || DEFAULT_CATALOGO;
+  ventas   = lsGetVentas();
   document.getElementById('resumenFecha').value = hoy();
   resetFechaHoy();
-  mostrarCargando(true);
-
-  // Cargar catálogo
-  const catSnap = await getDoc(doc(db, 'config', 'catalogo'));
-  catalogo = catSnap.exists() ? catSnap.data().items : DEFAULT_CATALOGO;
-  if (!catSnap.exists()) await guardarCatalogo();
-
   agregarProducto();
   actualizarPreview();
   checkAvisoPrecio();
+  mostrarCargando(false);
+  document.getElementById('offlineBanner').style.display = 'block';
+}
 
-  // Escuchar ventas en tiempo real
-  const q = query(collection(db, 'ventas'), orderBy('fecha', 'desc'));
-  unsubVentas = onSnapshot(q, snap => {
-    ventas = snap.docs.map(d => ({ firestoreId: d.id, ...d.data() }));
-    mostrarCargando(false);
-    const tab = document.querySelector('.screen.active')?.id?.replace('screen-','');
-    if (tab === 'resumen')   actualizarResumen();
-    if (tab === 'historial') renderHistorial();
-    if (tab === 'graficos')  renderGraficos();
-  });
+// Inicio con internet: carga local primero, luego sincroniza con Firestore
+async function iniciarApp() {
+  document.getElementById('resumenFecha').value = hoy();
+  resetFechaHoy();
+
+  // Cargar desde localStorage inmediatamente (app usable al instante)
+  catalogo = lsGetCatalogo() || DEFAULT_CATALOGO;
+  ventas   = lsGetVentas();
+  agregarProducto();
+  actualizarPreview();
+  checkAvisoPrecio();
+  mostrarCargando(false);
+
+  // Sincronizar con Firestore en segundo plano
+  await sincronizarCatalogoDesdeFirestore();
+  await sincronizarVentasDesdeFirestore();
+  await sincronizarPendientes();
 }
 
 function mostrarCargando(on) {
@@ -808,25 +817,16 @@ async function registrarVenta() {
   if (precio <= 0)   { showToast('Ingresá el precio total 💰', false); return; }
   if (!fechaVal)     { showToast('Seleccioná una fecha', false); return; }
 
-  const btn = document.querySelector('.btn-primary');
-  btn.textContent = 'Guardando...'; btn.disabled = true;
+  await guardar({
+    fecha: fechaVal,  // "2026-03-01T09:27" — hora local, sin conversión UTC
+    items, precio,
+    metodo: metodoSel || 'Sin especificar',
+    observaciones: obs
+  });
 
-  try {
-    await guardar({
-      fecha: new Date(fechaVal).toISOString(),
-      items,
-      precio,
-      metodo: metodoSel || 'Sin especificar',
-      observaciones: obs
-    });
-    showToast('¡Venta registrada! 🎉');
-    resetForm();
-  } catch(e) {
-    showToast('Error al guardar. ¿Tenés internet?', false);
-    console.error(e);
-  } finally {
-    btn.textContent = 'Registrar venta ✓'; btn.disabled = false;
-  }
+  const offline = !navigator.onLine;
+  showToast(offline ? 'Venta guardada localmente 📵 (se sincronizará luego)' : '¡Venta registrada! 🎉');
+  resetForm();
 }
 
 function resetForm() {
@@ -906,10 +906,10 @@ function renderHistorial() {
   if (!f.length) { c.innerHTML = `<div class="empty-state"><div class="icon">🍞</div><p>No hay ventas para mostrar</p></div>`; return; }
 
   c.innerHTML = f.map(v => `
-    <div class="venta-item" id="v-${v.firestoreId}">
+    <div class="venta-item" id="v-${v.localId}">
       <div class="venta-top">
         <div>
-          <div class="venta-fecha">${formatFecha(v.fecha)}</div>
+          <div class="venta-fecha">${formatFecha(v.fecha)}${!v.sincronizado ? ' <span style="color:var(--brown-light);font-size:0.68rem">⏳ pendiente</span>' : ''}</div>
           <div class="venta-metodo">${v.metodo}</div>
         </div>
         <div class="venta-precio">$${formatNum(v.precio)}</div>
@@ -922,19 +922,17 @@ function renderHistorial() {
           </div>`).join('')}
       </div>
       ${v.observaciones ? `<div class="venta-obs">${v.observaciones}</div>` : ''}
-      <button class="btn-del" onclick="eliminarVenta('${v.firestoreId}')">🗑 Eliminar</button>
+      <button class="btn-del" onclick="eliminarVenta('${v.localId}')">🗑 Eliminar</button>
     </div>
   `).join('');
 }
 
-async function eliminarVenta(firestoreId) {
+async function eliminarVenta(localId) {
   if (!confirm('¿Eliminar esta venta?')) return;
-  try {
-    await borrarVentaFirestore(firestoreId);
-    showToast('Venta eliminada');
-  } catch(e) {
-    showToast('Error al eliminar', false);
-  }
+  const venta = ventas.find(v => v.localId === localId);
+  if (!venta) return;
+  await borrarVenta(venta);
+  showToast('Venta eliminada');
 }
 
 // ════════════════════════════════
@@ -944,7 +942,8 @@ function renderGraficos() {
   const dias = [], ingresos = [];
   for (let i = 6; i >= 0; i--) {
     const d = new Date(); d.setDate(d.getDate() - i);
-    const key = d.toISOString().slice(0,10);
+    const pad = n => String(n).padStart(2,'0');
+    const key = `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
     dias.push(key.slice(5));
     ingresos.push(ventas.filter(v => v.fecha.slice(0,10) === key).reduce((a,v) => a + v.precio, 0));
   }
@@ -996,21 +995,191 @@ function exportarCSV() {
 }
 
 // ════════════════════════════════
-//  GUARDAR EN FIRESTORE
+//  GUARDAR — localStorage primero, Firestore en segundo plano
 // ════════════════════════════════
+
+function lsGetVentas() {
+  return JSON.parse(localStorage.getItem('budines_ventas') || '[]');
+}
+function lsSetVentas(v) {
+  localStorage.setItem('budines_ventas', JSON.stringify(v));
+}
+function lsGetCatalogo() {
+  return JSON.parse(localStorage.getItem('budines_catalogo') || 'null');
+}
+function lsSetCatalogo(c) {
+  localStorage.setItem('budines_catalogo', JSON.stringify(c));
+}
+function lsGetPendientes() {
+  return JSON.parse(localStorage.getItem('budines_pendientes') || '[]');
+}
+function lsSetPendientes(p) {
+  localStorage.setItem('budines_pendientes', JSON.stringify(p));
+}
+function lsGetSession() {
+  return JSON.parse(localStorage.getItem('budines_session') || 'null');
+}
+function lsSetSession(s) {
+  localStorage.setItem('budines_session', JSON.stringify(s));
+}
+
+// Guardar venta: localStorage inmediato + Firestore si hay internet
 async function guardar(venta) {
-  // venta nueva → addDoc; ya tiene firestoreId → no se llama desde aquí
-  await addDoc(collection(db, 'ventas'), venta);
+  const id = 'local_' + Date.now() + '_' + Math.random().toString(36).slice(2,7);
+  const ventaConId = { ...venta, localId: id, sincronizado: false };
+
+  // 1. Guardar en localStorage inmediatamente
+  const todas = lsGetVentas();
+  todas.unshift(ventaConId);
+  todas.sort((a,b) => new Date(b.fecha) - new Date(a.fecha));
+  lsSetVentas(todas);
+  ventas = todas;
+  refrescarVistas();
+
+  // 2. Intentar subir a Firestore
+  if (navigator.onLine && auth.currentUser) {
+    try {
+      const ref = await addDoc(collection(db, 'ventas'), { ...venta, localId: id });
+      // marcar como sincronizado
+      const actualizadas = lsGetVentas().map(v =>
+        v.localId === id ? { ...v, firestoreId: ref.id, sincronizado: true } : v
+      );
+      lsSetVentas(actualizadas);
+      ventas = actualizadas;
+    } catch(e) {
+      // guardar como pendiente para sincronizar después
+      const pendientes = lsGetPendientes();
+      pendientes.push({ ...venta, localId: id });
+      lsSetPendientes(pendientes);
+    }
+  } else {
+    // sin internet → encolar como pendiente
+    const pendientes = lsGetPendientes();
+    pendientes.push({ ...venta, localId: id });
+    lsSetPendientes(pendientes);
+  }
 }
+
+// Sincronizar ventas pendientes cuando vuelve internet
+async function sincronizarPendientes() {
+  const pendientes = lsGetPendientes();
+  if (!pendientes.length || !auth.currentUser) return;
+
+  const exito = [];
+  for (const venta of pendientes) {
+    try {
+      const { localId, ...datos } = venta;
+      const ref = await addDoc(collection(db, 'ventas'), { ...datos, localId });
+      const actualizadas = lsGetVentas().map(v =>
+        v.localId === localId ? { ...v, firestoreId: ref.id, sincronizado: true } : v
+      );
+      lsSetVentas(actualizadas);
+      ventas = actualizadas;
+      exito.push(localId);
+    } catch(e) { /* quedará para el próximo intento */ }
+  }
+  if (exito.length) {
+    lsSetPendientes(pendientes.filter(p => !exito.includes(p.localId)));
+    showToast(`${exito.length} venta${exito.length > 1 ? 's' : ''} sincronizada${exito.length > 1 ? 's' : ''} ✓`);
+    refrescarVistas();
+  }
+}
+
 async function guardarCatalogo() {
-  await setDoc(doc(db, 'config', 'catalogo'), { items: catalogo });
+  lsSetCatalogo(catalogo);
+  if (navigator.onLine && auth.currentUser) {
+    try { await setDoc(doc(db, 'config', 'catalogo'), { items: catalogo }); }
+    catch(e) { /* se intentará la próxima vez */ }
+  }
 }
-async function borrarVentaFirestore(firestoreId) {
-  await deleteDoc(doc(db, 'ventas', firestoreId));
+
+async function borrarVenta(venta) {
+  // borrar de localStorage
+  const todas = lsGetVentas().filter(v => v.localId !== venta.localId);
+  lsSetVentas(todas);
+  ventas = todas;
+  refrescarVistas();
+  // borrar de Firestore si existe
+  if (venta.firestoreId && navigator.onLine && auth.currentUser) {
+    try { await deleteDoc(doc(db, 'ventas', venta.firestoreId)); }
+    catch(e) { /* ignorar */ }
+  }
 }
+
+// Sincronizar catálogo desde Firestore (al abrir con internet)
+async function sincronizarCatalogoDesdeFirestore() {
+  if (!navigator.onLine || !auth.currentUser) return;
+  try {
+    const snap = await getDoc(doc(db, 'config', 'catalogo'));
+    if (snap.exists()) {
+      const remoto = snap.data().items;
+      // usar el remoto si es más reciente (tiene más entradas de precio)
+      const totalPreciosRemoto = remoto.reduce((s,p) => s + p.precios.length, 0);
+      const totalPreciosLocal  = catalogo.reduce((s,p) => s + p.precios.length, 0);
+      if (totalPreciosRemoto > totalPreciosLocal) {
+        catalogo = remoto;
+        lsSetCatalogo(catalogo);
+        renderCatalogo();
+        refrescarSelectsVenta();
+      }
+    } else if (catalogo.length) {
+      // subir el local si Firestore no tiene nada
+      await setDoc(doc(db, 'config', 'catalogo'), { items: catalogo });
+    }
+  } catch(e) { /* sin internet o error */ }
+}
+
+// Sincronizar ventas desde Firestore (al abrir con internet, para el otro dispositivo)
+async function sincronizarVentasDesdeFirestore() {
+  if (!navigator.onLine || !auth.currentUser) return;
+  try {
+    const q = query(collection(db, 'ventas'), orderBy('fecha', 'desc'));
+    const snap = await getDocs(q);
+    const remotas = snap.docs.map(d => ({ firestoreId: d.id, sincronizado: true, ...d.data() }));
+
+    // Merge: combinar remotas con locales no sincronizadas
+    const localesNoSync = lsGetVentas().filter(v => !v.sincronizado);
+    const todasLocal    = lsGetVentas().map(v => v.localId);
+
+    // Agregar remotas que no están en local
+    const nuevasRemotas = remotas.filter(r => !todasLocal.some(l => l === r.localId));
+    const merged = [...localesNoSync, ...remotas, ...nuevasRemotas.filter(n => !remotas.includes(n))];
+
+    // Deduplicar por localId
+    const seen = new Set();
+    const dedup = merged.filter(v => {
+      const key = v.localId || v.firestoreId;
+      if (seen.has(key)) return false;
+      seen.add(key); return true;
+    });
+    dedup.sort((a,b) => new Date(b.fecha) - new Date(a.fecha));
+    lsSetVentas(dedup);
+    ventas = dedup;
+    refrescarVistas();
+  } catch(e) { /* sin internet */ }
+}
+
+function refrescarVistas() {
+  const tab = document.querySelector('.screen.active')?.id?.replace('screen-','');
+  if (tab === 'resumen')   actualizarResumen();
+  if (tab === 'historial') renderHistorial();
+  if (tab === 'graficos')  renderGraficos();
+}
+
 function noData() { return '<p style="color:var(--text-muted);font-size:0.83rem">Sin datos para esta fecha</p>'; }
 function formatNum(n) { return (+n).toLocaleString('es-AR',{minimumFractionDigits:0,maximumFractionDigits:2}); }
-function formatFecha(iso) { const d = new Date(iso); return d.toLocaleDateString('es-AR')+' · '+d.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'}); }
+function formatFecha(f) {
+  // f puede ser "2026-03-01T09:27" (nuevo formato local) o ISO con Z (datos viejos)
+  if (f.endsWith('Z') || f.includes('+')) {
+    // dato viejo con timezone → convertir a local
+    const d = new Date(f);
+    return d.toLocaleDateString('es-AR') + ' · ' + d.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'});
+  }
+  // nuevo formato: parsear directo sin conversión
+  const [fecha, hora] = f.split('T');
+  const [anio, mes, dia] = fecha.split('-');
+  return `${dia}/${mes}/${anio} · ${hora.slice(0,5)}`;
+}
 function fmtFechaCorta(iso) { return new Date(iso).toLocaleDateString('es-AR'); }
 function showToast(msg, ok=true) {
   const t = document.getElementById('toast');
