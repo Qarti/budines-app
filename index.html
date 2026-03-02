@@ -459,10 +459,10 @@ function ocultarPantallaLogin(user) {
 //  INIT APP
 // ════════════════════════════════
 
-// Inicio offline: solo usa localStorage
+// Sin internet: solo mostramos las ventas pendientes del día
 function iniciarAppOffline() {
   catalogo = lsGetCatalogo() || DEFAULT_CATALOGO;
-  ventas   = lsGetVentas();
+  ventas = lsGetPendientes(); // solo las pendientes del día
   document.getElementById('resumenFecha').value = hoy();
   resetFechaHoy();
   agregarProducto();
@@ -472,23 +472,30 @@ function iniciarAppOffline() {
   document.getElementById('offlineBanner').style.display = 'block';
 }
 
-// Inicio con internet: carga local primero, luego sincroniza con Firestore
+// localStorage solo como buffer de pendientes, Firestore es la fuente de verdad
 async function iniciarApp() {
   document.getElementById('resumenFecha').value = hoy();
   resetFechaHoy();
 
-  // Cargar desde localStorage inmediatamente (app usable al instante)
-  catalogo = lsGetCatalogo() || DEFAULT_CATALOGO;
-  ventas   = lsGetVentas();
+  // Ventas pendientes del localStorage (sin internet previo)
+  const pendientes = lsGetPendientes();
+
+  if (navigator.onLine && auth.currentUser) {
+    // Sincronizar pendientes primero
+    await sincronizarPendientes();
+    // Cargar todo desde Firestore
+    await sincronizarVentasDesdeFirestore();
+    await sincronizarCatalogoDesdeFirestore();
+  } else {
+    // Sin internet: solo mostrar pendientes
+    ventas = pendientes;
+    catalogo = lsGetCatalogo() || DEFAULT_CATALOGO;
+  }
+
   agregarProducto();
   actualizarPreview();
   checkAvisoPrecio();
   mostrarCargando(false);
-
-  // Sincronizar con Firestore en segundo plano
-  await sincronizarCatalogoDesdeFirestore();
-  await sincronizarVentasDesdeFirestore();
-  await sincronizarPendientes();
 }
 
 function mostrarCargando(on) {
@@ -1023,41 +1030,31 @@ function lsSetSession(s) {
   localStorage.setItem('budines_session', JSON.stringify(s));
 }
 
-// Guardar venta: localStorage inmediato + Firestore si hay internet
+// Con internet → directo a Firestore, sin tocar localStorage
+// Sin internet → pendiente en localStorage hasta que vuelva la conexión
 async function guardar(venta) {
   const id = 'local_' + Date.now() + '_' + Math.random().toString(36).slice(2,7);
   const ventaConId = { ...venta, localId: id, sincronizado: false };
 
-  // 1. Guardar en localStorage inmediatamente
-  const todas = lsGetVentas();
-  todas.unshift(ventaConId);
-  todas.sort((a,b) => new Date(b.fecha) - new Date(a.fecha));
-  lsSetVentas(todas);
-  ventas = todas;
-  refrescarVistas();
-
-  // 2. Intentar subir a Firestore
   if (navigator.onLine && auth.currentUser) {
+    // Con internet → directo a Firestore
     try {
       const ref = await addDoc(collection(db, 'ventas'), { ...venta, localId: id });
-      // marcar como sincronizado
-      const actualizadas = lsGetVentas().map(v =>
-        v.localId === id ? { ...v, firestoreId: ref.id, sincronizado: true } : v
-      );
-      lsSetVentas(actualizadas);
-      ventas = actualizadas;
+      ventaConId.firestoreId = ref.id;
+      ventaConId.sincronizado = true;
     } catch(e) {
-      // guardar como pendiente para sincronizar después
-      const pendientes = lsGetPendientes();
-      pendientes.push({ ...venta, localId: id });
-      lsSetPendientes(pendientes);
+      // falló → guardar como pendiente
+      lsSetPendientes([...lsGetPendientes(), ventaConId]);
     }
   } else {
-    // sin internet → encolar como pendiente
-    const pendientes = lsGetPendientes();
-    pendientes.push({ ...venta, localId: id });
-    lsSetPendientes(pendientes);
+    // Sin internet → pendiente en localStorage
+    lsSetPendientes([...lsGetPendientes(), ventaConId]);
   }
+
+  // En memoria para mostrar en UI
+  ventas.unshift(ventaConId);
+  ventas.sort((a,b) => new Date(b.fecha) - new Date(a.fecha));
+  refrescarVistas();
 }
 
 // Sincronizar ventas pendientes cuando vuelve internet
@@ -1079,10 +1076,11 @@ async function sincronizarPendientes() {
     } catch(e) { /* quedará para el próximo intento */ }
   }
   if (exito.length) {
-    lsSetPendientes(pendientes.filter(p => !exito.includes(p.localId)));
-    showToast(`${exito.length} venta${exito.length > 1 ? 's' : ''} sincronizada${exito.length > 1 ? 's' : ''} ✓`);
-    refrescarVistas();
-  }
+  lsSetPendientes(pendientes.filter(p => !exito.includes(p.localId)));
+  // limpiar del array en memoria también los que ya están en Firestore
+  showToast(`${exito.length} venta${exito.length > 1 ? 's' : ''} sincronizada${exito.length > 1 ? 's' : ''} ✓`);
+  refrescarVistas();
+}
 }
 
 async function guardarCatalogo() {
