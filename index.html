@@ -1169,16 +1169,16 @@ function refrescarVistas() {
 function noData() { return '<p style="color:var(--text-muted);font-size:0.83rem">Sin datos para esta fecha</p>'; }
 function formatNum(n) { return (+n).toLocaleString('es-AR',{minimumFractionDigits:0,maximumFractionDigits:2}); }
 function formatFecha(f) {
-  // f puede ser "2026-03-01T09:27" (nuevo formato local) o ISO con Z (datos viejos)
+  let d;
   if (f.endsWith('Z') || f.includes('+')) {
-    // dato viejo con timezone → convertir a local
-    const d = new Date(f);
-    return d.toLocaleDateString('es-AR') + ' · ' + d.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'});
+    d = new Date(f);
+  } else {
+    const [fecha, hora] = f.split('T');
+    const [anio, mes, dia] = fecha.split('-');
+    const [hh, mm] = hora.split(':');
+    d = new Date(anio, mes - 1, dia, hh, mm);
   }
-  // nuevo formato: parsear directo sin conversión
-  const [fecha, hora] = f.split('T');
-  const [anio, mes, dia] = fecha.split('-');
-  return `${dia}/${mes}/${anio} · ${hora.slice(0,5)}`;
+  return d.toLocaleDateString('es-AR') + ' · ' + d.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
 }
 function fmtFechaCorta(iso) { return new Date(iso).toLocaleDateString('es-AR'); }
 function showToast(msg, ok=true) {
