@@ -990,9 +990,17 @@ function exportarCSV() {
   const header = 'Fecha,Hora,VentaID,Producto,Cantidad,PrecioUnit,PrecioTotal,Metodo,Observaciones';
   const rows = [];
   ventas.forEach(v => {
-    const d = new Date(v.fecha);
+    let d;
+    if (v.fecha.endsWith('Z') || v.fecha.includes('+')) {
+      d = new Date(v.fecha);
+    } else {
+    const [fecha, hora] = v.fecha.split('T');
+    const [anio, mes, dia] = fecha.split('-');
+    const [hh, mm] = hora.split(':');
+    d = new Date(anio, mes - 1, dia, hh, mm);
+    }
     const f = d.toLocaleDateString('es-AR'), h = d.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'});
-    v.items.forEach(i => rows.push([f, h, v.id, `"${i.nombre}"`, i.cantidad, i.precioUnit !== null ? i.precioUnit.toFixed(2) : '', v.precio.toFixed(2), v.metodo, `"${(v.observaciones||'').replace(/"/g,'""')}"`].join(',')));
+    v.items.forEach(i => rows.push([f, h, v.localId || v.firestoreId, `"${i.nombre}"`, i.cantidad, i.precioUnit !== null ? i.precioUnit.toFixed(2) : '', v.precio.toFixed(2), v.metodo, `"${(v.observaciones||'').replace(/"/g,'""')}"`].join(',')));
   });
   const blob = new Blob([header+'\n'+rows.join('\n')],{type:'text/csv;charset=utf-8;'});
   const url = URL.createObjectURL(blob);
@@ -1005,12 +1013,6 @@ function exportarCSV() {
 //  GUARDAR — localStorage primero, Firestore en segundo plano
 // ════════════════════════════════
 
-function lsGetVentas() {
-  return JSON.parse(localStorage.getItem('budines_ventas') || '[]');
-}
-function lsSetVentas(v) {
-  localStorage.setItem('budines_ventas', JSON.stringify(v));
-}
 function lsGetCatalogo() {
   return JSON.parse(localStorage.getItem('budines_catalogo') || 'null');
 }
@@ -1065,22 +1067,16 @@ async function sincronizarPendientes() {
   const exito = [];
   for (const venta of pendientes) {
     try {
-      const { localId, ...datos } = venta;
+      const { localId, sincronizado, ...datos } = venta;
       const ref = await addDoc(collection(db, 'ventas'), { ...datos, localId });
-      const actualizadas = lsGetVentas().map(v =>
-        v.localId === localId ? { ...v, firestoreId: ref.id, sincronizado: true } : v
-      );
-      lsSetVentas(actualizadas);
-      ventas = actualizadas;
       exito.push(localId);
     } catch(e) { /* quedará para el próximo intento */ }
   }
   if (exito.length) {
-  lsSetPendientes(pendientes.filter(p => !exito.includes(p.localId)));
-  // limpiar del array en memoria también los que ya están en Firestore
-  showToast(`${exito.length} venta${exito.length > 1 ? 's' : ''} sincronizada${exito.length > 1 ? 's' : ''} ✓`);
-  refrescarVistas();
-}
+    lsSetPendientes(pendientes.filter(p => !exito.includes(p.localId)));
+    showToast(`${exito.length} venta${exito.length > 1 ? 's' : ''} sincronizada${exito.length > 1 ? 's' : ''} ✓`);
+    await sincronizarVentasDesdeFirestore();
+  }
 }
 
 async function guardarCatalogo() {
@@ -1092,10 +1088,10 @@ async function guardarCatalogo() {
 }
 
 async function borrarVenta(venta) {
-  // borrar de localStorage
-  const todas = lsGetVentas().filter(v => v.localId !== venta.localId);
-  lsSetVentas(todas);
-  ventas = todas;
+  // borrar de pendientes si estaba ahí
+  lsSetPendientes(lsGetPendientes().filter(p => p.localId !== venta.localId));
+  // borrar de memoria
+  ventas = ventas.filter(v => v.localId !== venta.localId && v.firestoreId !== venta.firestoreId);
   refrescarVistas();
   // borrar de Firestore si existe
   if (venta.firestoreId && navigator.onLine && auth.currentUser) {
