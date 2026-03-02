@@ -1135,24 +1135,10 @@ async function sincronizarVentasDesdeFirestore() {
     const snap = await getDocs(q);
     const remotas = snap.docs.map(d => ({ firestoreId: d.id, sincronizado: true, ...d.data() }));
 
-    // Merge: combinar remotas con locales no sincronizadas
-    const localesNoSync = lsGetVentas().filter(v => !v.sincronizado);
-    const todasLocal    = lsGetVentas().map(v => v.localId);
-
-    // Agregar remotas que no están en local
-    const nuevasRemotas = remotas.filter(r => !todasLocal.some(l => l === r.localId));
-    const merged = [...localesNoSync, ...remotas, ...nuevasRemotas.filter(n => !remotas.includes(n))];
-
-    // Deduplicar por localId
-    const seen = new Set();
-    const dedup = merged.filter(v => {
-      const key = v.localId || v.firestoreId;
-      if (seen.has(key)) return false;
-      seen.add(key); return true;
-    });
-    dedup.sort((a,b) => new Date(b.fecha) - new Date(a.fecha));
-    lsSetVentas(dedup);
-    ventas = dedup;
+    // Combinar con pendientes locales que aún no subieron
+    const pendientes = lsGetPendientes();
+    ventas = [...pendientes, ...remotas];
+    ventas.sort((a,b) => new Date(b.fecha) - new Date(a.fecha));
     refrescarVistas();
   } catch(e) { /* sin internet */ }
 }
