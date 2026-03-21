@@ -889,7 +889,7 @@ function actualizarResumen() {
   });
   const combos = Object.entries(comboMap).sort((a,b) => b[1]-a[1]).slice(0,5);
   document.getElementById('comboStats').innerHTML = combos.length
-    ? combos.map(([k,n]) => `<div class="carrito-item" style="padding:4px 0;font-size:0.82rem"><span>${k}</span><span style="color:var(--brown-mid);font-weight:600">${n} vez${n!==1?'es':''}</span></div>`).join('')
+    ? combos.map(([k,n]) => `<div class="carrito-item" style="padding:4px 0;font-size:0.82rem"><span>${k}</span><span style="color:var(--brown-mid);font-weight:600">${n} ${n === 1?'vez':'veces'}</span></div>`).join('')
     : '<p style="color:var(--text-muted);font-size:0.83rem">Aparecerán cuando registres ventas con más de un producto.</p>';
 }
 
